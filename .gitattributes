@@ -1,0 +1,8 @@
+* text=auto eol=lf
+
+# Windows scripting hosts are happiest with CRLF; cmd.exe genuinely
+# mis-parses some constructs in LF-only files.
+*.cmd text eol=crlf
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+*.reg text eol=crlf

@@ -34,12 +34,13 @@
   Everything below is still valid as the general procedure, and the audit is
   still worth running to catch anything that is NOT this.
 
-  Full write-up: Scripts\README.md and DEBUG-STATE.md
+  Full write-up: POSTMORTEM.md
 
 
 WHAT IS IN THIS FOLDER
   wuguard.cmd             The fix. Pure batch, no PowerShell needed.
   Find-UpdateBlocker.ps1  Read-only forensics. Finds WHY it keeps happening.
+  POSTMORTEM.md           The 2026-09 case, closed. Read this first.
   README.md               Full documentation.
   RUNBOOK.txt             This file.
 

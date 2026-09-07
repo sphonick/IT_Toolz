@@ -7,7 +7,7 @@ Clone: `git@github.com:sphonick/IT_Toolz.git` · https://github.com/sphonick/IT_
 
 | Tool | Platform | What it does |
 |------|----------|--------------|
-| [`windows/WindowsUpdateGuard`](windows/WindowsUpdateGuard) | Windows 10/11 | Un-pauses Windows Update at every boot, and helps find whatever keeps pausing it |
+| [`windows/WindowsUpdateGuard`](windows/WindowsUpdateGuard) | Windows 10/11 | Un-pauses Windows Update at every boot, and helps find whatever keeps pausing it. Includes a [post-mortem](windows/WindowsUpdateGuard/POSTMORTEM.md) of the 2026-09 case |
 
 `CLAUDE.md` carries the project context for Claude Code sessions, including
 ones started on a target machine rather than the dev box.

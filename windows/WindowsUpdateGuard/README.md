@@ -4,6 +4,12 @@ Something on these Windows 11 boxes re-pauses Windows Update on every boot
 ("Updates paused until <date in the future>"), and it survives the obvious
 regedit fixes. This tool does two things:
 
+> **Case closed 2026-09-06.** On this fleet the cause was a `\PauseWindowsUpdate`
+> scheduled task left by an unattended-install answer file. See
+> [`POSTMORTEM.md`](POSTMORTEM.md) — read that first if you are here about a
+> recurrence. The tools below were never installed on any machine; only
+> `wuguard.cmd audit` was run, as a diagnostic. They are kept for reuse.
+
 1. **`wuguard.cmd`** — clears the pause/defer state and re-enables the update
    plumbing, and installs itself as a scheduled task so it runs a few minutes
    after every boot and every 4 hours thereafter.

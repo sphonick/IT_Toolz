@@ -7,10 +7,3 @@
 *.ps1 text eol=crlf
 *.reg text eol=crlf
 *.txt text eol=crlf
-
-# Evidence captured from affected machines: preserve byte-for-byte.
-# wu-audit.txt and several of the captured scripts/logs are UTF-16LE, where
-# git's LF->CRLF rewriting inserts 0x0D before the low byte of a newline and
-# corrupts the file. -text disables all conversion.
-windows/WindowsUpdateGuard/wu-audit.txt   -text
-windows/WindowsUpdateGuard/Scripts/**     -text

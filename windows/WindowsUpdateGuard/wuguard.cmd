@@ -264,7 +264,7 @@ if exist "%SystemRoot%\Setup\Scripts\*" (
     echo   PRESENT. These are dropped by an unattended-install answer file and run
     echo   during Windows Setup. They can register boot-triggered scheduled tasks.
     echo   CONFIRMED CAUSE 2026-09-06: PauseWindowsUpdate.ps1 re-stamps a rolling
-    echo   7-day pause window at every boot. See Scripts\README.md in the repo.
+    echo   7-day pause window at every boot. See POSTMORTEM.md in the repo.
     dir /b "%SystemRoot%\Setup\Scripts" 2>nul
 ) else (
     echo   not present

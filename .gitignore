@@ -4,6 +4,3 @@
 Thumbs.db
 desktop.ini
 .DS_Store
-
-# ...but the captured unattend logs are evidence, not build noise.
-!windows/WindowsUpdateGuard/Scripts/*.log

@@ -197,26 +197,30 @@ rmdir /s /q C:\Windows\Setup\Scripts
 Deleting the script files alone is **not** enough — the tasks stay registered
 and keep running, and failing, on every boot.
 
-## Loose ends
+## Verification
 
-- **The last pause window may still be sitting there.** If it was not cleared
-  manually or via "Resume updates", it expires on its own by **2026-09-14**,
-  after which updates resume. `wuguard.cmd repair` clears it immediately.
-- **Set real Active Hours.** With `\MoveActiveHours` gone, Windows can now
-  reboot on its own — that behaviour was previously suppressed.
-- **Expect a large first patch run.** Effectively unpatched since 2025-06-16.
-  Long scan, big download, several reboot cycles; do it outside working hours.
-  Nothing pins the build (`TargetReleaseVersion` was never set), so a feature
-  update is possible.
+Confirmed fixed. Scripts and both scheduled tasks removed, the residual pause
+window cleared by hand, and automatic updates observed working **across
+multiple reboots** — which is the test that matters here, since the task
+carried a 24-hour repetition on top of its boot trigger. A single clean boot
+would not have proven anything.
+
+## Remaining, for whoever reads this next
+
+- **Active Hours now matter.** With `\MoveActiveHours` gone, Windows can reboot
+  unattended again — that behaviour was previously suppressed. Set them
+  deliberately per machine (Settings > Windows Update > Advanced options).
 - **Feature updates can restore stripped components.** If removed apps or
-  features reappear after a build upgrade, that is normal Windows behaviour —
+  features reappear after a build upgrade, that is normal Windows behaviour,
   not the unattend scripts returning.
-- **Check the remaining workstations**: `dir C:\Windows\Setup\Scripts` and
+- **The install media still exists somewhere.** This is the only way the problem
+  comes back: whoever re-images the next machine reproduces all of it,
+  including the settings listed above that outlive the fix.
+  `C:\Windows\Panther\unattend.xml` — the cached copy of the answer file
+  actually used — lists every option that was selected, and is the right
+  starting point for regenerating corrected media.
+- **Any workstation not yet checked**: `dir C:\Windows\Setup\Scripts` and
   `schtasks /Query /TN "\PauseWindowsUpdate"`.
-- **The install media still exists somewhere.** Whoever re-images the next
-  machine reproduces all of this. `C:\Windows\Panther\unattend.xml` — the cached
-  copy of the answer file actually used — lists every option that was selected,
-  and is the right starting point for regenerating corrected media.
 
 ## Takeaway for the tooling
 

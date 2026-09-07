@@ -53,6 +53,38 @@ $os = Get-CimInstance Win32_OperatingSystem
 Write-Host "$($os.Caption)  build $((Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion').CurrentBuild).$((Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion').UBR)   last boot: $($os.LastBootUpTime)"
 
 # --------------------------------------------------------------------------
+Write-Section '0. Unattend setup scripts  (CONFIRMED CAUSE on this fleet, 2026-09-06)'
+$setupScripts = "$env:SystemRoot\Setup\Scripts"
+if (Test-Path $setupScripts) {
+    $files = Get-ChildItem $setupScripts -File -ErrorAction SilentlyContinue
+    Write-Bad "$setupScripts exists with $($files.Count) file(s)."
+    Write-Bad 'These are dropped by an unattended-install answer file (unattend.xml) and'
+    Write-Bad 'run during Windows Setup. They can register boot-triggered scheduled tasks,'
+    Write-Bad 'which is why nothing shows in Add/Remove Programs and registry edits do not'
+    Write-Bad 'stick. This is what was wrong on MSSEMPLOYEE.'
+    $files | Select-Object Name, Length, LastWriteTime | Format-Table -AutoSize | Out-String -Width 120 | Write-Host
+    foreach ($f in $files | Where-Object { $_.Extension -in '.ps1','.vbs','.cmd','.xml' }) {
+        $body = Get-Content $f.FullName -Raw -ErrorAction SilentlyContinue
+        if ($body -match 'Pause(Feature|Quality|)Updates|PauseUpdatesExpiryTime|ActiveHours|NoAutoUpdate|Register-ScheduledTask') {
+            Write-Hit "$($f.Name) touches update/active-hours settings or registers a task"
+        }
+    }
+    Write-Host ''
+    Write-Host '        Cleanup (delete the TASKS too - removing the scripts alone leaves' -ForegroundColor Gray
+    Write-Host '        them registered and failing forever):' -ForegroundColor Gray
+    Write-Host '          schtasks /Delete /TN "\PauseWindowsUpdate" /F' -ForegroundColor Gray
+    Write-Host '          schtasks /Delete /TN "\MoveActiveHours" /F' -ForegroundColor Gray
+    Write-Host '          rmdir /s /q C:\Windows\Setup\Scripts' -ForegroundColor Gray
+} else {
+    Write-Ok 'No C:\Windows\Setup\Scripts - no unattend leftovers.'
+}
+foreach ($tn in '\PauseWindowsUpdate', '\MoveActiveHours') {
+    $t = Get-ScheduledTask -ErrorAction SilentlyContinue |
+         Where-Object { "$($_.TaskPath)$($_.TaskName)" -eq $tn }
+    if ($t) { Write-Bad "Task $tn is STILL REGISTERED (state: $($t.State))" }
+    else    { Write-Ok  "Task $tn not present." }
+}
+
 Write-Section '1. Local Group Policy cache  (most common cause of "it comes back")'
 $pol = "$env:SystemRoot\System32\GroupPolicy\Machine\Registry.pol"
 if (Test-Path $pol) {
@@ -144,7 +176,7 @@ $sfItems = $sf | Where-Object { Test-Path $_ } | ForEach-Object { Get-ChildItem 
 if ($sfItems) { $sfItems | Select-Object FullName, LastWriteTime | Format-Table -AutoSize | Out-String -Width 140 | Write-Host }
 else { Write-Ok 'Startup folders are empty.' }
 
-Write-Host '  Non-Microsoft scheduled tasks referencing updates:'
+Write-Host '  Non-Microsoft scheduled tasks referencing updates (incl. root path \\):'
 $rogue = Get-ScheduledTask -ErrorAction SilentlyContinue |
     Where-Object { $_.TaskPath -notlike '\Microsoft\*' } |
     ForEach-Object {

@@ -29,22 +29,39 @@ also wants the machines patching today.
 
 ## Active work: WindowsUpdateGuard
 
-**Problem.** Several Windows 11 workstations re-pause Windows Update on every
-boot — the Settings app shows "Updates paused until \<future date\>". The user
-already tried regedit and hunting for installed programs; the state comes
-back. No reinstall wanted.
+**Problem - SOLVED 2026-09-06.** Windows 11 workstations re-paused Windows
+Update on every boot ("Updates paused until \<future date\>"). Regedit hunting
+and reviewing installed programs had both come up empty.
 
-**Working hypothesis, in order of likelihood:**
+**Root cause.** A scheduled task `\PauseWindowsUpdate` at the **root task
+path**, registered by `Specialize.ps1` from the machine's **unattended-install
+answer file** (`C:\Windows\Setup\Scripts\`, dated 2025-06-16 = the image build
+date). BootTrigger repeating every 24h, running as LOCAL SERVICE, writing a
+rolling 7-day pause window that re-stamps forward and therefore never expires.
+A sibling `\MoveActiveHours` slid Active Hours every 4h so installs never ran.
+The file set is the signature output of Christoph Schneegans' unattend
+generator. Not malware, not an upgrade artifact - baked into the image.
 
-1. **Local Group Policy** — `C:\Windows\System32\GroupPolicy\Machine\Registry.pol`
-   re-stamps the registry at boot and every ~90 min. This is the single most
-   likely explanation for "I deleted the key and it came back", and it has no
-   uninstaller and no visible process.
-2. MDM/Intune via `HKLM\SOFTWARE\Microsoft\PolicyManager\current\device\Update`.
-3. A debloat utility (O&O ShutUp10, Windows Update Blocker, StopUpdates10,
-   WinUtil, Sophia Script, W10Privacy…) with its own boot persistence.
-4. Non-software causes: metered connection, low disk on C:,
-   `TargetReleaseVersion` pinning.
+None of the *predicted* causes applied: no `Registry.pol`, no GPO, no MDM, no
+debloat utility, services all healthy, not metered. **The original hypothesis
+ranking in this file was wrong; unattend leftovers are now check #0 in both
+tools.**
+
+Evidence preserved in `windows/WindowsUpdateGuard/Scripts/` (read
+`Scripts/README.md`); full timeline and the remaining checklist live in
+`windows/WindowsUpdateGuard/DEBUG-STATE.md`. Read those before re-deriving
+anything.
+
+**Two detection bugs the real-world output exposed, now fixed in `wuguard.cmd`:**
+
+- The non-Microsoft-task search keyed on `pauseupdate`, which is not a
+  substring of `PauseWindowsUpdate` - it printed "(none found)" while the
+  culprit sat right there. Now matches on the task *name* against
+  update/pause/defer/wsus/wuau.
+- "Disabled update-related scheduled tasks" grepped the whole CSV line for
+  `Disabled`, which matches half a dozen other columns, so it listed Ready
+  tasks as disabled. Now parses column 4 specifically. That bug is the only
+  reason the culprit got printed at all - it was luck, not detection.
 
 **Deliverables** (`windows/WindowsUpdateGuard/`):
 
@@ -55,6 +72,8 @@ back. No reinstall wanted.
 | `RUNBOOK.txt` | Step-by-step for use on-site, plain text, Notepad-friendly |
 | `DEBUG-STATE.md` | Living record of what has been checked on which machine |
 | `README.md` | Full docs incl. a Linux→Windows cheat sheet |
+| `Scripts/` | **Evidence.** Verbatim capture of `C:\Windows\Setup\Scripts\` from the affected box. Read `Scripts/README.md`; do not run anything in there |
+| `wu-audit.txt` | The real `wuguard.cmd audit` output that cracked it (UTF-16LE, from `Tee-Object`) |
 
 **Design decisions that should not be quietly reversed:**
 
@@ -73,9 +92,9 @@ back. No reinstall wanted.
 
 ## Status / confidence
 
-- Scripts are **statically reviewed on Linux, never executed on Windows.**
-  Do not describe them as tested. First on-site action is `wuguard.cmd audit`,
-  which is read-only.
+- `wuguard.cmd audit` has now been **run for real** on one Windows 11 box and
+  produced correct output. `repair`, `install` and `Find-UpdateBlocker.ps1` are
+  still **unexecuted** - do not describe those as tested.
 - Known-fixed cmd.exe traps, worth not regressing:
   - **No literal `!` in log message strings** — `EnableDelayedExpansion` eats
     them. Warning prefix is `**`, not `!!`.

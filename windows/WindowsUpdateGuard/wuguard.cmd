@@ -123,6 +123,13 @@ call :warnif "%AU%" "UseWUServer"  "UseWUServer is set - this box takes updates 
 call :warnif "%POL%" "WUServer"    "WUServer is set - WSUS redirection is in effect"
 reg query "%MDM%" >nul 2>&1 && call :warn "MDM/Intune update policy present under PolicyManager - local edits get re-synced away; fix it at the MDM console"
 
+REM Known cause, confirmed 2026-09-06: an unattend answer file registers a
+REM boot-triggered task that re-pauses updates. Report, do not auto-delete -
+REM deleting someone's scheduled task is not this tool's call to make.
+if exist "%SystemRoot%\Setup\Scripts\PauseWindowsUpdate.ps1" call :warn "unattend artifact C:\Windows\Setup\Scripts\PauseWindowsUpdate.ps1 is present"
+schtasks /Query /TN "\PauseWindowsUpdate" >nul 2>&1 && call :warn "task \PauseWindowsUpdate exists - it re-pauses updates every boot. Remove: schtasks /Delete /TN \PauseWindowsUpdate /F"
+schtasks /Query /TN "\MoveActiveHours" >nul 2>&1 && call :warn "task \MoveActiveHours exists - it slides Active Hours so installs never run. Remove: schtasks /Delete /TN \MoveActiveHours /F"
+
 call :log "-- restoring update service start types"
 call :svc wuauserv        demand
 call :svc UsoSvc          auto
@@ -252,6 +259,17 @@ echo.
 echo --- MDM / Intune (PolicyManager) ---
 reg query "%MDM%" 2>nul || echo   (not MDM-managed for Update)
 echo.
+echo --- Unattend setup scripts (%SystemRoot%\Setup\Scripts) ---
+if exist "%SystemRoot%\Setup\Scripts\*" (
+    echo   PRESENT. These are dropped by an unattended-install answer file and run
+    echo   during Windows Setup. They can register boot-triggered scheduled tasks.
+    echo   CONFIRMED CAUSE 2026-09-06: PauseWindowsUpdate.ps1 re-stamps a rolling
+    echo   7-day pause window at every boot. See Scripts\README.md in the repo.
+    dir /b "%SystemRoot%\Setup\Scripts" 2>nul
+) else (
+    echo   not present
+)
+echo.
 echo --- Local Group Policy cache ---
 if exist "%SystemRoot%\System32\GroupPolicy\Machine\Registry.pol" (
     echo   Registry.pol EXISTS - Group Policy re-applies its contents at boot and
@@ -265,11 +283,15 @@ echo.
 echo --- Service start types (4 = disabled) ---
 for %%S in (wuauserv UsoSvc WaaSMedicSvc BITS DoSvc) do call :showsvc %%S
 echo.
-echo --- Disabled update-related scheduled tasks ---
-schtasks /Query /FO CSV /NH /V 2>nul | findstr /i "UpdateOrchestrator WindowsUpdate WaaSMedic InstallService" | findstr /i "Disabled" || echo   (none disabled)
+echo --- Scheduled tasks outside \Microsoft\ mentioning update/pause ---
+set "ROGUE=0"
+for /f "usebackq tokens=1 delims=," %%A in (`schtasks /Query /FO CSV /NH 2^>nul`) do call :flagtask "%%~A"
+if "!ROGUE!"=="0" echo   (none found)
 echo.
-echo --- Non-Microsoft scheduled tasks that mention updates ---
-schtasks /Query /FO CSV /NH /V 2>nul | findstr /i /v /c:"\Microsoft\Windows" | findstr /i "wuauserv UsoSvc WaaSMedic pauseupdate updateblock stopupdates" || echo   (none found)
+echo --- Disabled update-related scheduled tasks ---
+set "DISCOUNT=0"
+for /f "usebackq tokens=2,4 delims=," %%A in (`schtasks /Query /FO CSV /NH /V 2^>nul`) do call :dtask "%%~A" "%%~B"
+if "!DISCOUNT!"=="0" echo   (none disabled)
 echo.
 echo --- Metered connection cost (2 = metered, holds updates back) ---
 reg query "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\NetworkList\DefaultMediaCost" 2>nul | findstr /i "Ethernet WiFi 3G 4G" || echo   (defaults)
@@ -317,6 +339,27 @@ goto :eof
 REM  %1 = task name from schtasks CSV. Enable it if it is update plumbing.
 echo %~1 | findstr /i /c:"\Microsoft\Windows\UpdateOrchestrator\" /c:"\Microsoft\Windows\WindowsUpdate\" /c:"\Microsoft\Windows\InstallService\" /c:"\Microsoft\Windows\WaaSMedic\" >nul || goto :eof
 schtasks /Change /TN "%~1" /ENABLE >nul 2>&1 && set /a TASKSFIXED+=1
+goto :eof
+
+:flagtask
+REM  %1 = task name. Print it if it lives outside \Microsoft\ and looks
+REM  update-related. Matching is on the NAME, so "PauseWindowsUpdate" is caught
+REM  - the old keyword list missed it because "pauseupdate" is not a substring.
+echo %~1 | findstr /i /c:"\Microsoft\" >nul && goto :eof
+echo %~1 | findstr /i /c:"update" /c:"pause" /c:"defer" /c:"wsus" /c:"wuau" >nul || goto :eof
+set /a ROGUE+=1
+echo   TASK: %~1
+for /f "tokens=1,* delims=:" %%X in ('schtasks /Query /TN "%~1" /FO LIST /V 2^>nul ^| findstr /i /c:"Task To Run"') do echo         RUN:%%Y
+goto :eof
+
+:dtask
+REM  %1 = task name, %2 = Status column. Only column 4 counts as the state -
+REM  grepping the whole CSV line for "Disabled" matches half a dozen other
+REM  columns and reports Ready tasks as disabled.
+if /i not "%~2"=="Disabled" goto :eof
+echo %~1 | findstr /i /c:"UpdateOrchestrator" /c:"WindowsUpdate" /c:"WaaSMedic" /c:"InstallService" >nul || goto :eof
+set /a DISCOUNT+=1
+echo   %~1
 goto :eof
 
 :showsvc

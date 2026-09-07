@@ -4,6 +4,39 @@
           ("Updates paused until <some future date>")
 ===============================================================================
 
+*** SOLVED 2026-09-06 - READ THIS FIRST ***
+
+  On MSSEMPLOYEE the cause was a scheduled task named \PauseWindowsUpdate,
+  sitting at the ROOT task path (not in a \Microsoft\ folder), installed by
+  the machine's unattended-install answer file. It fires at every boot and
+  every 24h, running C:\Windows\Setup\Scripts\PauseWindowsUpdate.ps1, which
+  writes a rolling 7-day pause window. It can therefore never expire.
+
+  A sibling task \MoveActiveHours slides Active Hours every 4 hours so the
+  machine is nearly always inside them and never installs or reboots on its own.
+
+  ON EVERY OTHER WORKSTATION, CHECK THIS FIRST:
+
+      dir C:\Windows\Setup\Scripts
+      schtasks /Query /TN "\PauseWindowsUpdate"
+      schtasks /Query /TN "\MoveActiveHours"
+
+  If present, the fix is:
+
+      schtasks /Delete /TN "\PauseWindowsUpdate" /F
+      schtasks /Delete /TN "\MoveActiveHours" /F
+      rmdir /s /q C:\Windows\Setup\Scripts
+      .\wuguard.cmd repair
+
+  DELETING THE SCRIPT FILES ALONE IS NOT ENOUGH - the scheduled tasks stay
+  registered and keep running (and failing) on every boot. Delete both.
+
+  Everything below is still valid as the general procedure, and the audit is
+  still worth running to catch anything that is NOT this.
+
+  Full write-up: Scripts\README.md and DEBUG-STATE.md
+
+
 WHAT IS IN THIS FOLDER
   wuguard.cmd             The fix. Pure batch, no PowerShell needed.
   Find-UpdateBlocker.ps1  Read-only forensics. Finds WHY it keeps happening.

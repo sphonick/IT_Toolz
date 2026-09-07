@@ -1,0 +1,5 @@
+Found in C:\Windows\Setup\Scripts\
+
+All dated 6/16/2025 except FirstLogon.log from 11/30/2025
+
+Could be artifact from windows 10 to 11 upgrade?

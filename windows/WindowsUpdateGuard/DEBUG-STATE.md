@@ -93,6 +93,57 @@ Evidence preserved verbatim in `Scripts/` — see `Scripts/README.md`.
 
 ---
 
+## Provenance
+
+Fleet inherited around August 2026. The image was built by the previous IT
+admin with the unattend generator; no GPO, no MDM, no management layer. Before
+this fix the machines were being patched **by hand**.
+
+Assessed as legitimate-but-badly-configured, not malicious - see
+`Scripts/README.md`. Also note: it is **not** Chris Titus Tech's WinUtil, which
+is what a web search on the filenames will tell you.
+
+## Ruling out compromise (optional, for completeness)
+
+The captured scripts are clean - no Defender exclusions, no network activity,
+no credential handling, no concealment. To rule out anything that arrived
+*separately* from the image, on a live box:
+
+```powershell
+Get-MpPreference | Select-Object Exclusion*        # expect empty
+Get-MpComputerStatus | Select-Object RealTimeProtectionEnabled, AntivirusEnabled, AMServiceEnabled
+net localgroup administrators                      # any unrecognised account?
+Get-ScheduledTask | Where-Object TaskPath -notlike '\Microsoft\*'
+Get-CimInstance Win32_Service | Where-Object { $_.PathName -notmatch 'C:\\Windows\\' } |
+    Select-Object Name, StartMode, PathName
+```
+
+Also read `C:\Windows\Panther\unattend.xml` - the cached copy of the answer file
+actually used. It names every option the previous admin selected, and is where
+an autologon credential or an extra local account would show up. Neither
+appears anywhere in `Scripts/`.
+
+## What to expect on the first real patch run
+
+These machines have been effectively unpatched since the image was built
+(2025-06-16) apart from whatever was applied by hand. Once the pause is gone:
+
+- **A large backlog.** Expect a long scan, a big download, and several reboot
+  cycles before they settle. Do the first pass outside working hours.
+- **Possibly a feature update.** Nothing pins the build - `TargetReleaseVersion`
+  was never set - so they are free to jump releases.
+- **Feature updates can restore removed components.** The image stripped
+  capabilities, optional features and Store apps (`RemoveCapabilities.ps1`,
+  `RemoveFeatures.ps1`, `RemovePackages.ps1`). A build upgrade may quietly put
+  some back. Not a problem, just don't be surprised - and don't read it as the
+  unattend scripts having returned.
+- **Set real Active Hours.** With `\MoveActiveHours` deleted, Windows can now
+  reboot on its own. Set them deliberately per machine
+  (Settings > Windows Update > Advanced options) or you will annoy someone
+  mid-workday.
+
+---
+
 ## Per-machine findings
 
 Copy this block per workstation.

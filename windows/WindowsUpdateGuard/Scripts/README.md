@@ -18,6 +18,39 @@ So this was baked into the **image at install time**. It is not malware, not a
 user-installed utility, and not an upgrade artifact — which is exactly why
 regedit spelunking and reviewing installed programs both came up empty.
 
+## Commonly misattributed - it is NOT Chris Titus Tech's WinUtil
+
+A web search on these filenames confidently returns "Chris Titus Tech's Windows
+Utility (winutil)". That is wrong, and chasing it wastes time - WinUtil has no
+concept of `C:\Windows\Setup\Scripts` and nothing here matches its
+architecture. The confusion is understandable: both produce near-identical
+debloat *effects* (same app removal lists, Copilot off, telemetry tweaks) and
+WinUtil's MicroWin feature does build custom ISOs. The search matched on what
+the scripts do, not on how they got there.
+
+The mechanism is the discriminator:
+
+- `C:\Windows\Setup\Scripts\` is populated from an answer file and executed by
+  Windows Setup. WinUtil is a post-install interactive tool.
+- The filenames map 1:1 onto the generator's documented execution phases, with
+  its exact log paths - including the asymmetry where `UserOnce.ps1` alone logs
+  to `%TEMP%` while every sibling logs to `Setup\Scripts`.
+- `PauseWindowsUpdate.xml` and `MoveActiveHours` are named resources in
+  https://github.com/cschneegans/unattend-generator
+
+## Provenance
+
+Built by the previous IT admin as a debloated Windows 11 image. Fleet was
+inherited around August 2026; there is no GPO, no MDM and no management layer,
+which is consistent with a hand-built image deployed and then left alone.
+
+The tool is legitimate and open source. The *configuration* is an enthusiast
+"make Windows less annoying" profile that is a poor fit for business
+workstations - see the settings table below. Nothing here is malicious: no
+Defender exclusions, no network callouts, no credential handling, no
+concealment. Tasks are registered under their real names with their source and
+logs sitting in plain sight.
+
 ## The mechanism
 
 `Specialize.ps1` registers two scheduled tasks at the **root** task path:

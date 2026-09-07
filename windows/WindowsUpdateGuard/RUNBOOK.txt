@@ -1,0 +1,325 @@
+===============================================================================
+ WindowsUpdateGuard - ON-SITE RUNBOOK
+ Symptom: Windows 11 workstation re-pauses Windows Update on every boot
+          ("Updates paused until <some future date>")
+===============================================================================
+
+WHAT IS IN THIS FOLDER
+  wuguard.cmd             The fix. Pure batch, no PowerShell needed.
+  Find-UpdateBlocker.ps1  Read-only forensics. Finds WHY it keeps happening.
+  README.md               Full documentation.
+  RUNBOOK.txt             This file.
+
+
+-------------------------------------------------------------------------------
+ GETTING THIS ONTO THE TARGET MACHINE
+-------------------------------------------------------------------------------
+
+Repo:  git@github.com:sphonick/IT_Toolz.git         (SSH)
+       https://github.com/sphonick/IT_Toolz.git     (HTTPS - use this on a
+                                                     workstation with no key)
+
+If the box has git:
+
+  git clone https://github.com/sphonick/IT_Toolz.git C:\Temp\IT_Toolz
+  cd C:\Temp\IT_Toolz\windows\WindowsUpdateGuard
+
+If it does not, grab the zip in a browser:
+
+  https://github.com/sphonick/IT_Toolz/archive/refs/heads/main.zip
+
+  ...then right-click the .zip > Properties > check "Unblock" > OK BEFORE
+  extracting. Windows marks downloaded files with a mark-of-the-web that
+  makes PowerShell refuse to run the .ps1.
+
+Or just copy the folder off the USB stick. Any of the three is fine.
+
+If you pull it down fresh on-site and end up changing anything, push it back
+so the fix travels with the repo rather than living on one stick.
+
+
+-------------------------------------------------------------------------------
+ BEFORE YOU START
+-------------------------------------------------------------------------------
+
+Copy the whole folder off the USB stick to the local disk first, e.g.
+C:\Temp\WindowsUpdateGuard. Running from removable media works but the
+scheduled task must point at a fixed local path, and "install" handles that
+by copying itself to C:\ProgramData anyway.
+
+Open PowerShell AS ADMINISTRATOR.
+  Right-click Start > "Terminal (Admin)" or "Windows PowerShell (Admin)".
+
+  How to confirm you are actually elevated - the title bar says
+  "Administrator:". If you are not elevated, wuguard.cmd will pop a UAC
+  prompt and relaunch itself in a SEPARATE cmd window; your output will go
+  to that window instead of the one you are looking at.
+
+Then change into the folder:
+
+  cd C:\Temp\WindowsUpdateGuard
+
+IMPORTANT: PowerShell does not have "." on its PATH. You must type ".\" in
+front of the script name. Bare "wuguard.cmd" will fail with
+"not recognized as the name of a cmdlet".
+
+
+-------------------------------------------------------------------------------
+ STEP 1 - AUDIT  (read-only, changes nothing)
+-------------------------------------------------------------------------------
+
+  .\wuguard.cmd audit
+
+Output goes to the console only. Nothing is written to disk, nothing in the
+registry is touched. To keep a copy while still watching it scroll:
+
+  .\wuguard.cmd audit 2>&1 | Tee-Object -FilePath $env:USERPROFILE\Desktop\wu-audit.txt
+
+WHAT TO LOOK AT, IN THIS ORDER:
+
+  "Local Group Policy cache"
+      If it says Registry.pol EXISTS, that is very likely your whole answer.
+      Group Policy re-stamps that file onto the registry at boot and again
+      every ~90 minutes. That is exactly why editing the registry by hand
+      never sticks and why there is no program to uninstall.
+
+  "MDM / Intune (PolicyManager)"
+      If present, this machine is centrally managed. Local edits will be
+      re-synced away. Fix it at the MDM console, not on the box.
+
+  "UX\Settings"
+      PauseUpdatesExpiryTime / PauseQualityUpdatesEndTime etc. are the actual
+      "paused until <date>" values the Settings app displays.
+
+  "Service start types"
+      4 = DISABLED. wuauserv or UsoSvc sitting at 4 means something turned
+      the update plumbing off outright.
+
+  "Metered connection cost"
+      2 = metered. Windows holds updates back on metered links. This is not
+      software doing it and no script will fix it - change it in
+      Settings > Network > adapter > Metered connection.
+
+
+-------------------------------------------------------------------------------
+ STEP 2 - FIND THE CULPRIT  (read-only)
+-------------------------------------------------------------------------------
+
+  powershell -ExecutionPolicy Bypass -File .\Find-UpdateBlocker.ps1
+
+Goes deeper than the audit. Notably it can actually decode Registry.pol
+(it is UTF-16, which plain batch cannot read) and will tell you whether it
+really contains Windows Update policy. It also hunts for known "debloat"
+utilities - O&O ShutUp10, Windows Update Blocker, StopUpdates10, WinUtil,
+Sophia Script, W10Privacy and friends - plus their persistence in Run keys,
+startup folders, services and third-party scheduled tasks.
+
+Save it if you want to compare across the machines:
+
+  powershell -ExecutionPolicy Bypass -File .\Find-UpdateBlocker.ps1 2>&1 | Tee-Object -FilePath $env:USERPROFILE\Desktop\wu-blocker.txt
+
+IF NOTHING IS CONCLUSIVE - catch it in the act:
+
+  powershell -ExecutionPolicy Bypass -File .\Find-UpdateBlocker.ps1 -EnableAuditing
+
+  This is the ONLY thing in that script that writes anything. It turns on
+  registry auditing and puts an audit rule on the two Windows Update keys.
+  Then:
+      1. Reboot the machine.
+      2. Let it re-pause itself.
+      3. Run Find-UpdateBlocker.ps1 again WITHOUT the flag.
+      4. Read section 7 - Security event 4657 will name the exact process
+         that wrote the pause value.
+
+  That is the definitive answer and it is how you avoid a reinstall.
+
+
+-------------------------------------------------------------------------------
+ STEP 3 - DECIDE BEFORE YOU INSTALL
+-------------------------------------------------------------------------------
+
+If STEP 1/2 pointed at LOCAL GROUP POLICY, fix it properly instead:
+
+    gpedit.msc
+      Computer Configuration
+        Administrative Templates
+          Windows Components
+            Windows Update
+              -> set the offending settings back to "Not Configured"
+
+  That removes it at the source. A boot script is only a workaround.
+  If gpedit is being stubborn, the blunt version (backs up Registry.pol
+  into C:\ProgramData\IT_Toolz\WindowsUpdateGuard first):
+
+    .\wuguard.cmd repair /gpo
+
+  Do NOT use /gpo on a domain-joined machine expecting it to hold. The
+  domain controller pushes the policy straight back at the next refresh.
+  Fix it in the domain GPO instead.
+
+If it pointed at MDM / INTUNE:
+  Fix it in the MDM console. Nothing you do locally will survive.
+
+If it pointed at a THIRD-PARTY TOOL:
+  Uninstall it, then also delete whatever scheduled task or Run key the
+  forensics script flagged - several of these re-apply their settings at
+  boot even after you uninstall the GUI.
+
+If you cannot find it, or you just want the machines patching TODAY:
+  proceed to STEP 4. That is what the tool is for.
+
+
+-------------------------------------------------------------------------------
+ STEP 4 - INSTALL
+-------------------------------------------------------------------------------
+
+  .\wuguard.cmd install
+
+This does three things:
+  1. Copies itself to C:\ProgramData\IT_Toolz\WindowsUpdateGuard\wuguard.cmd
+  2. Registers scheduled task  \IT_Toolz\WindowsUpdateGuard
+       runs as SYSTEM, highest privileges
+       2 minutes after every boot, then repeats every 4 hours
+  3. Runs the repair once, immediately
+
+Console output and the log both get written. Log lives at:
+
+  C:\ProgramData\IT_Toolz\WindowsUpdateGuard\wuguard.log
+
+WHAT "repair" ACTUALLY CHANGES:
+  - deletes the Pause*/Paused* values under
+      HKLM\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings
+  - deletes Defer*/Pause*/TargetReleaseVersion/BranchReadinessLevel etc under
+      HKLM\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate
+  - deletes NoAutoUpdate / AUOptions under that key's \AU subkey
+  - resets start types on wuauserv, UsoSvc, WaaSMedicSvc, BITS, DoSvc,
+    cryptsvc, TrustedInstaller
+  - re-enables the disabled tasks under \Microsoft\Windows\UpdateOrchestrator\
+    and \WindowsUpdate\ and \InstallService\ and \WaaSMedic\
+  - triggers a scan (sc start wuauserv + UsoClient StartScan)
+
+WHAT IT DELIBERATELY DOES NOT TOUCH:
+  - WSUS redirection (WUServer / UseWUServer)
+  - MDM / Intune policy
+  Both are usually intentional in a managed environment. Ripping them out
+  locally either breaks patching or gets re-pushed within the hour, so they
+  are printed as "**" warnings and left alone.
+
+
+-------------------------------------------------------------------------------
+ STEP 5 - VERIFY
+-------------------------------------------------------------------------------
+
+  .\wuguard.cmd status
+
+Shows the scheduled task (next run, last run, last result), the current pause
+state, and the last 15 log lines. "status" is the one action that does not
+require elevation.
+
+Also check the GUI:  Settings > Windows Update
+  The "Resume updates" / "Paused until" banner should be gone and it should
+  start checking.
+
+Force the task to run on demand without rebooting:
+
+  schtasks /Run /TN "\IT_Toolz\WindowsUpdateGuard"
+
+Then reboot and confirm it still holds. THE REBOOT IS THE REAL TEST - the
+whole problem is that something does this at boot.
+
+  A "Last Result" of 0 means the task ran fine. 267009 means it is currently
+  running. Anything else, read the log.
+
+
+-------------------------------------------------------------------------------
+ ROLLBACK / UNDO
+-------------------------------------------------------------------------------
+
+Remove the scheduled task:
+
+  .\wuguard.cmd uninstall
+
+Remove everything else by hand:
+
+  schtasks /Delete /TN "\IT_Toolz\WindowsUpdateGuard" /F
+  rmdir /s /q C:\ProgramData\IT_Toolz
+
+If you used /gpo and want the old policy back, the backup is at:
+
+  C:\ProgramData\IT_Toolz\WindowsUpdateGuard\Registry.pol.bak_<timestamp>
+
+  Copy it back to C:\Windows\System32\GroupPolicy\Machine\Registry.pol
+  and run:  gpupdate /force
+
+Note: repair does not back up the individual registry values it deletes.
+They are all documented above and all of them are "absent = Windows default",
+so the undo for any of them is simply to leave them absent.
+
+
+-------------------------------------------------------------------------------
+ TROUBLESHOOTING
+-------------------------------------------------------------------------------
+
+"wuguard.cmd is not recognized..."
+    You forgot the ".\" prefix in PowerShell. Type  .\wuguard.cmd audit
+
+A second window opens and mine goes blank
+    Your PowerShell was not elevated. The script relaunched itself via UAC.
+    Close both, reopen PowerShell as Administrator.
+
+"Access is denied" on a registry delete, or a service will not change
+    Something put an explicit DENY rule on the key. Find-UpdateBlocker.ps1
+    reports these under section 5. You will need to take ownership of the key
+    (regedit > right-click > Permissions > Advanced > Owner) before the fix
+    can apply. This is a strong hint that a blocker tool is installed.
+
+Find-UpdateBlocker.ps1 will not run / execution policy error
+    Use the full form:
+      powershell -ExecutionPolicy Bypass -File .\Find-UpdateBlocker.ps1
+
+The pause comes back BETWEEN the 4-hour runs
+    Shorten the interval. Uninstall, then edit REPEATMINS near the top of
+    wuguard.cmd (default 240) and re-run install. But if it is coming back
+    that fast, go back to STEP 2 and use -EnableAuditing - you want the
+    cause, not a faster mop.
+
+Task shows "Could not start" / last result 0x1
+    Confirm the path exists:
+      dir C:\ProgramData\IT_Toolz\WindowsUpdateGuard\wuguard.cmd
+    and that the task's Run As user is SYSTEM:
+      schtasks /Query /TN "\IT_Toolz\WindowsUpdateGuard" /V /FO LIST
+
+
+-------------------------------------------------------------------------------
+ WORTH RULING OUT - NOT SOFTWARE
+-------------------------------------------------------------------------------
+
+  - Metered connection on the Ethernet or Wi-Fi adapter (see STEP 1).
+  - Less than ~20 GB free on C:. Feature updates defer themselves when disk
+    is tight and the wording in the UI looks a lot like a manual pause.
+  - TargetReleaseVersion pinning the box to an older build. It will read as
+    "You're up to date" forever while never moving forward. repair clears it.
+  - Active hours - not a pause, but it will delay installs and reboots.
+
+
+-------------------------------------------------------------------------------
+ BRING BACK
+-------------------------------------------------------------------------------
+
+If you want to diff the machines afterward, collect from each:
+
+  C:\ProgramData\IT_Toolz\WindowsUpdateGuard\wuguard.log
+  the wu-audit.txt / wu-blocker.txt files from the Desktop
+
+If all the affected boxes show the same Registry.pol or the same third-party
+tool, that is the fleet-wide fix and the boot task can come back out.
+
+
+-------------------------------------------------------------------------------
+ CAVEAT
+-------------------------------------------------------------------------------
+
+This batch file was written and reviewed on Linux, not executed on Windows.
+Start with "audit" on ONE machine - it is read-only, so the worst case is a
+line that prints nothing useful. Once you have seen it behave, roll on.
+===============================================================================
